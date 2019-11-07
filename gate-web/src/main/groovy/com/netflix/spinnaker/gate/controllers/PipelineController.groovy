@@ -23,6 +23,7 @@ import com.netflix.spinnaker.gate.services.PipelineService
 import com.netflix.spinnaker.gate.services.TaskService
 import com.netflix.spinnaker.gate.services.internal.Front50Service
 import com.netflix.spinnaker.kork.exceptions.HasAdditionalAttributes
+import com.netflix.spinnaker.kork.web.exceptions.InvalidRequestException
 import com.netflix.spinnaker.kork.web.exceptions.NotFoundException
 import com.netflix.spinnaker.security.AuthenticatedRequest
 import groovy.transform.CompileDynamic
@@ -59,14 +60,14 @@ class PipelineController {
   ObjectMapper objectMapper
 
   @ApiOperation(value = "Delete a pipeline definition")
-  @RequestMapping(value = "/{application}/{pipelineName:.+}", method = RequestMethod.DELETE)
+  @DeleteMapping("/{application}/{pipelineName:.+}")
   void deletePipeline(@PathVariable String application, @PathVariable String pipelineName) {
     pipelineService.deleteForApplication(application, pipelineName)
   }
 
   @CompileDynamic
   @ApiOperation(value = "Save a pipeline definition")
-  @RequestMapping(value = '', method = RequestMethod.POST)
+  @PostMapping('')
   void savePipeline(@RequestBody Map pipeline) {
     def operation = [
       description: (String) "Save pipeline '${pipeline.get("name") ?: "Unknown"}'",
@@ -91,13 +92,13 @@ class PipelineController {
   }
 
   @ApiOperation(value = "Rename a pipeline definition")
-  @RequestMapping(value = 'move', method = RequestMethod.POST)
+  @PostMapping('move')
   void renamePipeline(@RequestBody Map renameCommand) {
     pipelineService.move(renameCommand)
   }
 
   @ApiOperation(value = "Retrieve a pipeline execution")
-  @RequestMapping(value = "{id}", method = RequestMethod.GET)
+  @GetMapping("{id}")
   Map getPipeline(@PathVariable("id") String id) {
     try {
       pipelineService.getPipeline(id)
@@ -110,7 +111,7 @@ class PipelineController {
 
   @CompileDynamic
   @ApiOperation(value = "Update a pipeline definition", response = HashMap.class)
-  @RequestMapping(value = "{id}", method = RequestMethod.PUT)
+  @PutMapping("{id}")
   Map updatePipeline(@PathVariable("id") String id, @RequestBody Map pipeline) {
     def operation = [
       description: (String) "Update pipeline '${pipeline.get("name") ?: 'Unknown'}'",
@@ -140,7 +141,7 @@ class PipelineController {
   }
 
   @ApiOperation(value = "Cancel a pipeline execution")
-  @RequestMapping(value = "{id}/cancel", method = RequestMethod.PUT)
+  @PutMapping("{id}/cancel")
   void cancelPipeline(@PathVariable("id") String id,
                       @RequestParam(required = false) String reason,
                       @RequestParam(defaultValue = "false") boolean force) {
@@ -148,37 +149,37 @@ class PipelineController {
   }
 
   @ApiOperation(value = "Pause a pipeline execution")
-  @RequestMapping(value = "{id}/pause", method = RequestMethod.PUT)
+  @PutMapping("{id}/pause")
   void pausePipeline(@PathVariable("id") String id) {
     pipelineService.pausePipeline(id)
   }
 
   @ApiOperation(value = "Resume a pipeline execution", response = HashMap.class)
-  @RequestMapping(value = "{id}/resume", method = RequestMethod.PUT)
+  @PutMapping("{id}/resume")
   void resumePipeline(@PathVariable("id") String id) {
     pipelineService.resumePipeline(id)
   }
 
   @ApiOperation(value = "Update a stage execution", response = HashMap.class)
-  @RequestMapping(value = "/{id}/stages/{stageId}", method = RequestMethod.PATCH)
+  @PatchMapping("/{id}/stages/{stageId}")
   Map updateStage(@PathVariable("id") String id, @PathVariable("stageId") String stageId, @RequestBody Map context) {
     pipelineService.updatePipelineStage(id, stageId, context)
   }
 
   @ApiOperation(value = "Restart a stage execution", response = HashMap.class)
-  @RequestMapping(value = "/{id}/stages/{stageId}/restart", method = RequestMethod.PUT)
+  @PutMapping("/{id}/stages/{stageId}/restart")
   Map restartStage(@PathVariable("id") String id, @PathVariable("stageId") String stageId, @RequestBody Map context) {
     pipelineService.restartPipelineStage(id, stageId, context)
   }
 
   @ApiOperation(value = "Delete a pipeline execution", response = HashMap.class)
-  @RequestMapping(value = "{id}", method = RequestMethod.DELETE)
+  @DeleteMapping("{id}")
   Map deletePipeline(@PathVariable("id") String id) {
     pipelineService.deletePipeline(id);
   }
 
   @ApiOperation(value = "Initiate a pipeline execution")
-  @RequestMapping(value = '/start', method = RequestMethod.POST)
+  @PostMapping('/start')
   ResponseEntity start(@RequestBody Map map) {
     if (map.containsKey("application")) {
       RequestContext.setApplication(map.get("application").toString())
@@ -190,8 +191,10 @@ class PipelineController {
   }
 
   @ApiOperation(value = "Trigger a pipeline execution")
-  @RequestMapping(value = "/{application}/{pipelineNameOrId:.+}", method = RequestMethod.POST)
-  HttpEntity invokePipelineConfig(@PathVariable("application") String application,
+  @PostMapping("/{application}/{pipelineNameOrId:.+}")
+  @ResponseBody
+  @ResponseStatus(HttpStatus.ACCEPTED)
+  Map invokePipelineConfig(@PathVariable("application") String application,
                                   @PathVariable("pipelineNameOrId") String pipelineNameOrId,
                                   @RequestBody(required = false) Map trigger) {
     trigger = trigger ?: [:]
@@ -200,20 +203,19 @@ class PipelineController {
 
     RequestContext.setApplication(application)
     try {
-      def body = pipelineService.trigger(application, pipelineNameOrId, trigger)
-      new ResponseEntity(body, HttpStatus.ACCEPTED)
+      pipelineService.trigger(application, pipelineNameOrId, trigger)
     } catch (NotFoundException e) {
       throw e
     } catch (e) {
       log.error("Unable to trigger pipeline (application: {}, pipelineId: {})",
         value("application", application), value("pipelineId", pipelineNameOrId), e)
-      new ResponseEntity([message: e.message], new HttpHeaders(), HttpStatus.UNPROCESSABLE_ENTITY)
+      throw new PipelineExecutionException(e.message)
     }
   }
 
   @ApiOperation(value = "Trigger a pipeline execution")
   @PreAuthorize("hasPermission(#application, 'APPLICATION', 'EXECUTE')")
-  @RequestMapping(value = "/v2/{application}/{pipelineNameOrId:.+}", method = RequestMethod.POST)
+  @PostMapping("/v2/{application}/{pipelineNameOrId:.+}")
   HttpEntity invokePipelineConfigViaEcho(@PathVariable("application") String application,
                                          @PathVariable("pipelineNameOrId") String pipelineNameOrId,
                                          @RequestBody(required = false) Map trigger) {
@@ -230,7 +232,7 @@ class PipelineController {
   }
 
   @ApiOperation(value = "Evaluate a pipeline expression using the provided execution as context", response = HashMap.class)
-  @RequestMapping(value = "{id}/evaluateExpression")
+  @GetMapping("{id}/evaluateExpression")
   Map evaluateExpressionForExecution(@PathVariable("id") String id,
                                      @RequestParam("expression") String pipelineExpression) {
     try {
@@ -243,7 +245,7 @@ class PipelineController {
   }
 
   @ApiOperation(value = "Evaluate a pipeline expression using the provided execution as context", response = HashMap.class)
-  @RequestMapping(value = "{id}/evaluateExpression", method = RequestMethod.POST, consumes = "text/plain")
+  @PostMapping(value = "{id}/evaluateExpression", consumes = "text/plain")
   Map evaluateExpressionForExecutionViaPOST(@PathVariable("id") String id,
                                             @RequestBody String pipelineExpression) {
     try {
@@ -256,7 +258,7 @@ class PipelineController {
   }
 
   @ApiOperation(value = "Evaluate a pipeline expression at a specific stage using the provided execution as context", response = HashMap.class)
-  @RequestMapping(value = "{id}/{stageId}/evaluateExpression")
+  @GetMapping("{id}/{stageId}/evaluateExpression")
   Map evaluateExpressionForExecutionAtStage(@PathVariable("id") String id,
                                             @PathVariable("stageId") String stageId,
                                             @RequestParam("expression") String pipelineExpression) {
@@ -270,7 +272,7 @@ class PipelineController {
   }
 
   @ApiOperation(value = "Evaluate a pipeline expression using the provided execution as context", response = HashMap.class)
-  @RequestMapping(value = "{id}/evaluateExpression", method = RequestMethod.POST, consumes = "application/json")
+  @PostMapping(value = "{id}/evaluateExpression", consumes = "application/json")
   Map evaluateExpressionForExecutionViaPOST(@PathVariable("id") String id,
                                             @RequestBody Map pipelineExpression) {
     try {
@@ -306,6 +308,14 @@ class PipelineController {
 
     PipelineException(Map<String, Object> additionalAttributes) {
       this.additionalAttributes = additionalAttributes
+    }
+  }
+
+  @ResponseStatus(HttpStatus.UNPROCESSABLE_ENTITY)
+  @InheritConstructors
+  class PipelineExecutionException extends InvalidRequestException {
+    PipelineExecutionException(String message) {
+      super(message)
     }
   }
 }

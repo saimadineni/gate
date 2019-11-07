@@ -32,9 +32,12 @@ class BakeService {
 
   // Default bake options from configuration.
   List<BakeOptions> bakeOptions
+  // If set, use bake options defined in gate.yml instead of calling rosco
+  boolean useDefaultBakeOptions
 
   def bakeOptions() {
-    roscoServiceSelector ? roscoServiceSelector.withLocation().bakeOptions() : bakeOptions
+    (roscoServiceSelector && !useDefaultBakeOptions) ?
+      roscoServiceSelector.withLocation().bakeOptions() : bakeOptions
   }
 
   def bakeOptions(String cloudProvider) {
@@ -72,6 +75,7 @@ class BakeService {
     String id
     String shortDescription
     String detailedDescription
+    String displayName
     String packageType
     List<String> vmTypes
   }
